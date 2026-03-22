@@ -1,6 +1,5 @@
 """Secret dependency for API authentication."""
 import secrets
-import uuid
 from typing import Optional
 from fastapi import Security
 from fastapi.security import APIKeyHeader
@@ -27,16 +26,16 @@ class SecretManager:
             try:
                 return settings.secret_api_key
             except KeyError:
-                secret_value = str(uuid.uuid4())
+                secret_value = secrets.token_urlsafe(32)
                 logger.warning(
                     "Environment variable 'SECRET_API_KEY' is in incorrect format. "
-                    f"Generated a single-use secret key for this session: {secret_value}"
+                    "Generated a single-use secret key for this session."
                 )
         else:
-            secret_value = str(uuid.uuid4())
+            secret_value = secrets.token_urlsafe(32)
             logger.warning(
                 "Environment variable 'SECRET_API_KEY' not found. "
-                f"Generated a single-use secret key for this session: {secret_value}"
+                "Generated a single-use secret key for this session."
             )
         return secret_value
 

@@ -8,6 +8,26 @@ class Series(Media):
         self.episode = episode
         self.seasonfile = None
 
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d["season"] = self.season
+        d["episode"] = self.episode
+        d["seasonfile"] = self.seasonfile
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Series":
+        obj = cls(
+            id=data["id"],
+            tmdb_id=data["tmdb_id"],
+            titles=data["titles"],
+            season=data.get("season"),
+            episode=data.get("episode"),
+            languages=data["languages"],
+        )
+        obj.seasonfile = data.get("seasonfile")
+        return obj
+
     def get_season_number(self) -> int:
         """Extract season number from season string (e.g., 'S02' -> 2)"""
         if self.season and self.season.startswith('S'):

@@ -1,5 +1,5 @@
 import asyncio
-import pickle
+import json
 from datetime import datetime, timedelta
 
 from redis import Redis
@@ -56,7 +56,7 @@ async def validate_config_and_api_key(config: str, apikey_dao: APIKeyDAO):
 async def get_cached_item(redis_client: Redis, cache_key: str):
     cached_item = await asyncio.to_thread(redis_client.get, cache_key)
     if cached_item:
-        return pickle.loads(cached_item)
+        return json.loads(cached_item)
     return None
 
 
@@ -64,7 +64,7 @@ async def cache_item(
     redis_client: Redis, cache_key: str, item, duration: int = 7 * 24 * 60 * 60
 ):
     await asyncio.to_thread(
-        redis_client.set, cache_key, pickle.dumps(item), ex=duration
+        redis_client.set, cache_key, item.model_dump_json(), ex=duration
     )
 
 
@@ -172,7 +172,7 @@ async def get_catalog(
             await check_api_key(api_key, apikey_dao)
 
         logger.debug(
-            f"Received catalog request from api_key: {api_key}, type: {type}, id: {id}, config: {config_data}"
+            f"Received catalog request from api_key: {api_key[:4] + '***' if api_key else None}, type: {type}, id: {id}"
         )
 
         if type not in {"movie", "series"} or id not in {
@@ -340,8 +340,8 @@ async def get_catalog(
                 meta = await create_meta_object(details, item_type, imdb_id, include_episodes=False)
 
                 try:
-                    pipeline.set(item_cache_key_tmdb, pickle.dumps(meta), ex=7 * 24 * 60 * 60)
-                    pipeline.set(f"imdbid_item:{imdb_id}", pickle.dumps(meta), ex=7 * 24 * 60 * 60)
+                    pipeline.set(item_cache_key_tmdb, meta.model_dump_json(), ex=7 * 24 * 60 * 60)
+                    pipeline.set(f"imdbid_item:{imdb_id}", meta.model_dump_json(), ex=7 * 24 * 60 * 60)
                     pipeline.set(f"tmdbid_to_imdbid:{tmdb_id}", imdb_id, ex=7 * 24 * 60 * 60)
                 except Exception as cache_err:
                     logger.error(f"Error adding item TMDB:{tmdb_id}/IMDB:{imdb_id} to cache pipeline: {cache_err}")
@@ -395,7 +395,7 @@ async def get_meta(
             await check_api_key(api_key, apikey_dao)
 
         logger.debug(
-            f"Received meta request from api_key: {api_key}, type: {type}, id: {id}"
+            f"Received meta request from api_key: {api_key[:4] + '***' if api_key else None}, type: {type}, id: {id}"
         )
 
         if type not in {"movie", "series"}:
