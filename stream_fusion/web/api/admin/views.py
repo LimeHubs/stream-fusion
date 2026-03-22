@@ -14,10 +14,11 @@ from stream_fusion.web.api.auth.schemas import UsageLogs, UsageLog
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 from stream_fusion.services.redis.redis_config import get_redis_dependency
+from stream_fusion.web.api.utils import ensure_uuid
 
 router = APIRouter()
 
-templates = Jinja2Templates(directory="/app/stream_fusion/static/admin")
+templates = Jinja2Templates(directory=settings.admin_template_dir)
 
 SECRET_KEY_NAME = "secret-key"
 secret_header = APIKeyHeader(name=SECRET_KEY_NAME, auto_error=False)
@@ -166,21 +167,12 @@ async def create_api_key(
     logger.info(f"Creating new API key. Name: {name}, Never expires: {never_expires}, Proxied links: {proxied_links}")
     key = APIKeyCreate(name=name, never_expire=never_expires, proxied_links=proxied_links)
     new_key = await apikey_dao.create_key(key)
-    logger.info(f"New API key created: {new_key.api_key}")
+    logger.info("New API key created successfully.")
     return RedirectResponse(
         url=custom_url_for("list_api_keys")(request), status_code=HTTP_303_SEE_OTHER
     )
 
 
-def ensure_uuid(api_key: str) -> uuid.UUID:
-    """Convert a string to UUID if it's not already a UUID object."""
-    if isinstance(api_key, uuid.UUID):
-        return api_key
-    try:
-        return uuid.UUID(api_key)
-    except ValueError:
-        logger.error(f"Invalid API key format: {api_key}")
-        raise HTTPException(status_code=400, detail="Invalid API key format")
 
 @router.post("/revoke-api-key")
 async def revoke_api_key(

@@ -13,117 +13,67 @@ from stream_fusion.utils.debrid.stremthru import StremThru
 from stream_fusion.logging_config import logger
 from stream_fusion.settings import settings
 
+# (stremthru_store, config_token_key, class, st_extension)
+_SERVICE_MAP = {
+    "Real-Debrid": ("realdebrid",  "RDToken",        RealDebrid,  "ST:RD"),
+    "AllDebrid":   ("alldebrid",   "ADToken",        AllDebrid,   "ST:AD"),
+    "TorBox":      ("torbox",      "TBToken",        Torbox,      "ST:TB"),
+    "Premiumize":  ("premiumize",  "PMToken",        Premiumize,  "ST:PM"),
+    "Debrid-Link": ("debridlink",  "DLToken",        DebridLink,  "ST:DL"),
+    "EasyDebrid":  ("easydebrid",  "EDToken",        EasyDebrid,  "ST:ED"),
+    "Offcloud":    ("offcloud",    "OCCredentials",  Offcloud,    "ST:OC"),
+    "PikPak":      ("pikpak",      "PPCredentials",  PikPak,      "ST:PP"),
+}
+
+_SHORT_TO_FULL = {
+    "RD": "Real-Debrid",
+    "AD": "AllDebrid",
+    "TB": "TorBox",
+    "PM": "Premiumize",
+    "DL": "Debrid-Link",
+    "ED": "EasyDebrid",
+    "OC": "Offcloud",
+    "PP": "PikPak",
+}
+
+
+def _build_service(full_name: str, config: dict, session: aiohttp.ClientSession):
+    store_name, token_key, cls, st_extension = _SERVICE_MAP[full_name]
+    use_stremthru = config.get("stremthru", False)
+    if use_stremthru:
+        st = StremThru(config, session)
+        st.set_store_credentials(store_name, config.get(token_key, ""))
+        st.extension = st_extension
+        logger.debug(f"{full_name} (via StremThru): service added to be use")
+        return st
+    logger.debug(f"{full_name}: service added to be use")
+    return cls(config, session)
+
 
 def get_all_debrid_services(config, session: aiohttp.ClientSession = None):
-    services = config['service']
-    debrid_service = []
+    services = config["service"]
     if not services:
         logger.error("No service configuration found in the config file.")
         return []
 
-    use_stremthru = config.get('stremthru', False)
-
+    debrid_services = []
     for service in services:
-        if service == "Real-Debrid":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("realdebrid", config.get("RDToken", ""))
-                st.extension = "ST:RD"
-                debrid_service.append(st)
-                logger.debug("Real-Debrid (via StremThru): service added to be use")
-            else:
-                debrid_service.append(RealDebrid(config, session))
-                logger.debug("Real-Debrid: service added to be use")
+        if service not in _SERVICE_MAP:
+            logger.warning(f"Unknown service: {service}, skipping.")
+            continue
+        debrid_services.append(_build_service(service, config, session))
 
-        if service == "AllDebrid":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("alldebrid", config.get("ADToken", ""))
-                st.extension = "ST:AD"
-                debrid_service.append(st)
-                logger.debug("AllDebrid (via StremThru): service added to be use")
-            else:
-                debrid_service.append(AllDebrid(config, session))
-                logger.debug("AllDebrid: service added to be use")
-
-        if service == "TorBox":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("torbox", config.get("TBToken", ""))
-                st.extension = "ST:TB"
-                debrid_service.append(st)
-                logger.debug("TorBox (via StremThru): service added to be use")
-            else:
-                debrid_service.append(Torbox(config, session))
-                logger.debug("TorBox: service added to be use")
-
-        if service == "Premiumize":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("premiumize", config.get("PMToken", ""))
-                st.extension = "ST:PM"
-                debrid_service.append(st)
-                logger.debug("Premiumize (via StremThru): service added to be use")
-            else:
-                debrid_service.append(Premiumize(config, session))
-                logger.debug("Premiumize: service added to be use")
-
-        if service == "Debrid-Link":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("debridlink", config.get("DLToken", ""))
-                st.extension = "ST:DL"
-                debrid_service.append(st)
-                logger.debug("Debrid-Link (via StremThru): service added to be use")
-            else:
-                debrid_service.append(DebridLink(config, session))
-                logger.debug("Debrid-Link: service added to be use")
-
-        if service == "EasyDebrid":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("easydebrid", config.get("EDToken", ""))
-                st.extension = "ST:ED"
-                debrid_service.append(st)
-                logger.debug("EasyDebrid (via StremThru): service added to be use")
-            else:
-                debrid_service.append(EasyDebrid(config, session))
-                logger.debug("EasyDebrid: service added to be use")
-
-        if service == "Offcloud":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("offcloud", config.get("OCCredentials", ""))
-                st.extension = "ST:OC"
-                debrid_service.append(st)
-                logger.debug("Offcloud (via StremThru): service added to be use")
-            else:
-                debrid_service.append(Offcloud(config, session))
-                logger.debug("Offcloud: service added to be use")
-
-        if service == "PikPak":
-            if use_stremthru:
-                st = StremThru(config, session)
-                st.set_store_credentials("pikpak", config.get("PPCredentials", ""))
-                st.extension = "ST:PP"
-                debrid_service.append(st)
-                logger.debug("PikPak (via StremThru): service added to be use")
-            else:
-                debrid_service.append(PikPak(config, session))
-                logger.debug("PikPak: service added to be use")
-
-    if not debrid_service:
+    if not debrid_services:
         raise HTTPException(status_code=500, detail="Invalid service configuration.")
 
-    return debrid_service
+    return debrid_services
 
 
 def get_download_service(config, session: aiohttp.ClientSession = None):
     if not settings.download_service:
-        service = config.get('debridDownloader')
+        service = config.get("debridDownloader")
         if not service:
-            # Si aucun service n'est spécifié, utiliser le service activé
-            services = config.get('service', [])
+            services = config.get("service", [])
             if len(services) == 1:
                 service = services[0]
                 logger.info(f"Using active service as download service: {service}")
@@ -131,125 +81,31 @@ def get_download_service(config, session: aiohttp.ClientSession = None):
                 logger.error("Multiple services enabled. Please select a download service in the web interface.")
                 raise HTTPException(
                     status_code=500,
-                    detail="Multiple services enabled. Please select a download service in the web interface."
+                    detail="Multiple services enabled. Please select a download service in the web interface.",
                 )
     else:
         service = settings.download_service
 
-    use_stremthru = config.get('stremthru', False)
-
-    if service == "Real-Debrid":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("realdebrid", config.get("RDToken", ""))
-            return st
-        return RealDebrid(config, session)
-    elif service == "AllDebrid":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("alldebrid", config.get("ADToken", ""))
-            return st
-        return AllDebrid(config, session)
-    elif service == "TorBox":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("torbox", config.get("TBToken", ""))
-            return st
-        return Torbox(config, session)
-    elif service == "Premiumize":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("premiumize", config.get("PMToken", ""))
-            return st
-        return Premiumize(config, session)
-    elif service == "Debrid-Link":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("debridlink", config.get("DLToken", ""))
-            return st
-        return DebridLink(config, session)
-    elif service == "EasyDebrid":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("easydebrid", config.get("EDToken", ""))
-            return st
-        return EasyDebrid(config, session)
-    elif service == "Offcloud":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("offcloud", config.get("OCCredentials", ""))
-            return st
-        return Offcloud(config, session)
-    elif service == "PikPak":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("pikpak", config.get("PPCredentials", ""))
-            return st
-        return PikPak(config, session)
-    else:
+    if service not in _SERVICE_MAP:
         logger.error(f"Invalid download service: {service}")
         raise HTTPException(
             status_code=500,
-            detail=f"Invalid download service: {service}. Please select a valid download service in the web interface."
+            detail=f"Invalid download service: {service}. Please select a valid download service in the web interface.",
         )
+
+    return _build_service(service, config, session)
 
 
 def get_debrid_service(config, service, session: aiohttp.ClientSession = None):
     if not service:
         service = settings.download_service
 
-    use_stremthru = config.get('stremthru', False)
-
-    if service == "RD":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("realdebrid", config.get("RDToken", ""))
-            return st
-        return RealDebrid(config, session)
-    elif service == "AD":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("alldebrid", config.get("ADToken", ""))
-            return st
-        return AllDebrid(config, session)
-    elif service == "TB":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("torbox", config.get("TBToken", ""))
-            return st
-        return Torbox(config, session)
-    elif service == "PM":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("premiumize", config.get("PMToken", ""))
-            return st
-        return Premiumize(config, session)
-    elif service == "DL":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("debridlink", config.get("DLToken", ""))
-            return st
-        return DebridLink(config, session)
-    elif service == "ED":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("easydebrid", config.get("EDToken", ""))
-            return st
-        return EasyDebrid(config, session)
-    elif service == "OC":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("offcloud", config.get("OCCredentials", ""))
-            return st
-        return Offcloud(config, session)
-    elif service == "PP":
-        if use_stremthru:
-            st = StremThru(config, session)
-            st.set_store_credentials("pikpak", config.get("PPCredentials", ""))
-            return st
-        return PikPak(config, session)
-    elif service == "ST":
+    if service == "ST":
         return get_download_service(config, session)
-    else:
+
+    full_name = _SHORT_TO_FULL.get(service)
+    if not full_name:
         logger.error("Invalid service configuration return by stremio in the query.")
         raise HTTPException(status_code=500, detail="Invalid service configuration return by stremio.")
+
+    return _build_service(full_name, config, session)

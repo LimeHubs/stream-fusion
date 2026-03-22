@@ -23,7 +23,7 @@ class RealDebrid(BaseDebrid):
         if not settings.rd_unique_account:
             self.token_manager = RDTokenManager(config)
 
-    def get_headers(self):
+    async def get_headers(self):
         if settings.rd_unique_account:
             if not settings.proxied_link:
                 logger.warning(
@@ -45,15 +45,16 @@ class RealDebrid(BaseDebrid):
                     status_code=500, detail="Real-Debrid: Token is not provided."
                 )
         else:
-            return {"Authorization": f"Bearer {self.token_manager.get_access_token()}"}
+            return {"Authorization": f"Bearer {await self.token_manager.get_access_token()}"}
 
     async def add_magnet(self, magnet, ip=None):
         url = f"{self.base_url}torrents/addMagnet"
         data = {"magnet": magnet}
         logger.info(f"Real-Debrid: Adding magnet: {magnet}")
         try:
+            headers = await self.get_headers()
             return await self.json_response(
-                url, method="post", headers=self.get_headers(), data=data
+                url, method="post", headers=headers, data=data
             )
         except HTTPException as e:
             if e.status_code == 451:
@@ -64,8 +65,9 @@ class RealDebrid(BaseDebrid):
     async def add_torrent(self, torrent_file):
         url = f"{self.base_url}torrents/addTorrent"
         try:
+            headers = await self.get_headers()
             return await self.json_response(
-                url, method="put", headers=self.get_headers(), data=torrent_file
+                url, method="put", headers=headers, data=torrent_file
             )
         except HTTPException as e:
             if e.status_code == 451:
@@ -75,12 +77,14 @@ class RealDebrid(BaseDebrid):
 
     async def delete_torrent(self, id):
         url = f"{self.base_url}torrents/delete/{id}"
-        return await self.json_response(url, method="delete", headers=self.get_headers())
+        headers = await self.get_headers()
+        return await self.json_response(url, method="delete", headers=headers)
 
     async def get_torrent_info(self, torrent_id):
         logger.info(f"Real-Debrid: Getting torrent info for ID: {torrent_id}")
         url = f"{self.base_url}torrents/info/{torrent_id}"
-        torrent_info = await self.json_response(url, headers=self.get_headers())
+        headers = await self.get_headers()
+        torrent_info = await self.json_response(url, headers=headers)
         if not torrent_info or "files" not in torrent_info:
             return None
         return torrent_info
@@ -94,7 +98,8 @@ class RealDebrid(BaseDebrid):
         data = {"files": str(file_id)}
         session = await self._get_session()
         timeout = aiohttp.ClientTimeout(total=30)
-        async with session.post(url, headers=self.get_headers(), data=data, timeout=timeout) as response:
+        headers = await self.get_headers()
+        async with session.post(url, headers=headers, data=data, timeout=timeout) as response:
             pass  # Just need to make the request
 
     async def unrestrict_link(self, link):
@@ -105,7 +110,8 @@ class RealDebrid(BaseDebrid):
 
         for attempt in range(max_retries):
             try:
-                response = await self.json_response(url, method="post", headers=self.get_headers(), data=data)
+                headers = await self.get_headers()
+                response = await self.json_response(url, method="post", headers=headers, data=data)
                 if response and "download" in response:
                     return response
                 else:
@@ -123,7 +129,8 @@ class RealDebrid(BaseDebrid):
     async def is_already_added(self, magnet):
         hash = magnet.split("urn:btih:")[1].split("&")[0].lower()
         url = f"{self.base_url}torrents"
-        torrents = await self.json_response(url, headers=self.get_headers())
+        headers = await self.get_headers()
+        torrents = await self.json_response(url, headers=headers)
         for torrent in torrents:
             if torrent["hash"].lower() == hash:
                 return torrent["id"]
@@ -230,7 +237,8 @@ class RealDebrid(BaseDebrid):
     async def _get_cached_torrent_ids(self, info_hash):
         await self._torrent_rate_limit()
         url = f"{self.base_url}torrents"
-        torrents = await self.json_response(url, headers=self.get_headers())
+        headers = await self.get_headers()
+        torrents = await self.json_response(url, headers=headers)
 
         logger.info(f"Real-Debrid: Searching user's downloads for hash: {info_hash}")
         torrent_ids = [
