@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import os
 import time
@@ -164,9 +165,9 @@ class TorrentService:
             if torrent_item.link and torrent_item.link.startswith("magnet:"):
                 processed_torrent_item = self.__process_magnet(torrent_item)
             elif settings.sharewood_url and torrent_item.link and torrent_item.link.startswith(settings.sharewood_url):
-                processed_torrent_item = self.__process_sharewood_web_url(torrent_item)
+                processed_torrent_item = await asyncio.to_thread(self.__process_sharewood_web_url, torrent_item)
             else:
-                processed_torrent_item = self.__process_web_url(torrent_item)
+                processed_torrent_item = await asyncio.to_thread(self.__process_web_url, torrent_item)
 
             self._strip_private_credentials(processed_torrent_item)
             await self.cache_torrent(processed_torrent_item)

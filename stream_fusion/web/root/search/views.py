@@ -47,19 +47,10 @@ from stream_fusion.utils.lacale.lacale_result import LaCaleResult as LaCaleSearc
 from stream_fusion.utils.generationfree.generationfree_service import GenerationFreeService
 from stream_fusion.utils.generationfree.generationfree_result import GenerationFreeResult as GenerationFreeSearchResult
 from stream_fusion.settings import settings
+from stream_fusion.web.utils import get_client_ip
 
 
 router = APIRouter()
-
-
-def get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
-    return request.client.host
 
 
 async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key, get_metadata, stream_type, debrid_services, torrent_dao, request):
@@ -203,7 +194,7 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             torrent_smart_container.update_availability(result, type(debrid), next_media)
 
                     if config["cache"]:
-                        torrent_smart_container.cache_container_items()
+                        asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
                     best_matching_results = torrent_smart_container.get_best_matching()
                     best_matching_results = sort_items(best_matching_results, config)
@@ -705,7 +696,7 @@ async def get_results(
                     )
 
         if config["cache"]:
-            torrent_smart_container.cache_container_items()
+            asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
         best_matching_results = torrent_smart_container.get_best_matching()
         best_matching_results = sort_items(best_matching_results, config)

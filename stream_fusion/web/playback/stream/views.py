@@ -1,4 +1,3 @@
-from io import BytesIO
 import hashlib
 import json
 from urllib.parse import unquote
@@ -25,6 +24,7 @@ from stream_fusion.utils.debrid.status_video import build_status_video_response,
 from stream_fusion.utils.parse_config import parse_config
 from stream_fusion.utils.string_encoding import decodeb64
 from stream_fusion.utils.security import check_api_key
+from stream_fusion.web.utils import get_client_ip
 from stream_fusion.web.playback.stream.schemas import (
     ErrorResponse,
     HeadResponse,
@@ -39,96 +39,25 @@ redis_client = redis.Redis(
 DOWNLOAD_IN_PROGRESS_FLAG = "DOWNLOAD_IN_PROGRESS"
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract real client IP from headers (X-Forwarded-For) or fallback to direct connection IP."""
-    # Check X-Forwarded-For header (set by Traefik/reverse proxy)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # X-Forwarded-For can be comma-separated list, take the first (original client)
-        client_ip = forwarded_for.split(",")[0].strip()
-        logger.debug(f"Client IP extracted from X-Forwarded-For: {client_ip}")
-        return client_ip
-
-    # Check X-Real-IP header (alternative header used by some proxies)
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        logger.debug(f"Client IP extracted from X-Real-IP: {real_ip}")
-        return real_ip
-
-    # Fallback to direct connection IP
-    direct_ip = request.client.host
-    logger.debug(f"Client IP extracted from direct connection: {direct_ip}")
-    return direct_ip
-
 
 class ProxyStreamer:
-    def __init__(
-        self,
-        request: Request,
-        url: str,
-        headers: dict,
-        buffer_size: int = settings.proxy_buffer_size,
-    ):
+    def __init__(self, request: Request, url: str, headers: dict):
         self.request = request
         self.url = url
         self.headers = headers
         self.response = None
-        self.buffer = BytesIO()
-        self.buffer_size = buffer_size
-        self.eof = False
-
-    async def fill_buffer(self):
-        while len(self.buffer.getvalue()) < self.buffer_size and not self.eof:
-            chunk = await self.response.content.read(
-                self.buffer_size - len(self.buffer.getvalue())
-            )
-            if not chunk:
-                self.eof = True
-                break
-            self.buffer.write(chunk)
-        self.buffer.seek(0)
 
     async def stream_content(self):
         async with self.request.app.state.http_session.get(
             self.url, headers=self.headers
         ) as self.response:
-            while True:
-                if self.buffer.tell() == len(self.buffer.getvalue()):
-                    if self.eof:
-                        break
-                    self.buffer = BytesIO()
-                    await self.fill_buffer()
-
-                chunk = self.buffer.read(8192)
-                if chunk:
-                    yield chunk
-                else:
-                    await asyncio.sleep(0.1)
+            async for chunk in self.response.content.iter_any():
+                yield chunk
 
     async def close(self):
         if self.response:
             await self.response.release()
         logger.debug("Playback: Streaming connection closed")
-
-
-# class ProxyStreamer:
-#     def __init__(self, request: Request, url: str, headers: dict):
-#         self.request = request
-#         self.url = url
-#         self.headers = headers
-#         self.response = None
-
-#     async def stream_content(self):
-#         async with self.request.app.state.http_session.get(
-#             self.url, headers=self.headers
-#         ) as self.response:
-#             async for chunk in self.response.content.iter_any():
-#                 yield chunk
-
-#     async def close(self):
-#         if self.response:
-#             await self.response.release()
-#         logger.debug("Streaming connection closed")
 
 
 async def handle_download(

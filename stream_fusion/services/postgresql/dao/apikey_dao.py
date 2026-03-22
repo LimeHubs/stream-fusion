@@ -23,6 +23,20 @@ class APIKeyDAO:
         self.session = session
         self.expiration_limit = 15  # Default expiration limit in days
 
+    @staticmethod
+    def _model_to_schema(key: APIKeyModel) -> APIKeyInDB:
+        return APIKeyInDB(
+            id=key.id,
+            api_key=key.api_key,
+            is_active=key.is_active,
+            never_expire=key.never_expire,
+            expiration_date=timestamp_to_datetime(key.expiration_date),
+            latest_query_date=timestamp_to_datetime(key.latest_query_date),
+            total_queries=key.total_queries,
+            name=key.name,
+            proxied_links=key.proxied_links,
+        )
+
     async def create_key(self, api_key_create: APIKeyCreate) -> APIKeyInDB:
         async with self.session.begin():
             try:
@@ -46,17 +60,7 @@ class APIKeyDAO:
                 await self.session.flush()
 
                 logger.success(f"Created new API key: {api_key}")
-                return APIKeyInDB(
-                    id=new_key.id,
-                    api_key=new_key.api_key,
-                    is_active=new_key.is_active,
-                    never_expire=new_key.never_expire,
-                    expiration_date=timestamp_to_datetime(new_key.expiration_date),
-                    latest_query_date=timestamp_to_datetime(new_key.latest_query_date),
-                    total_queries=new_key.total_queries,
-                    name=new_key.name,
-                    proxied_links=new_key.proxied_links
-                )
+                return self._model_to_schema(new_key)
             except Exception as e:
                 logger.error(f"Error creating API key: {str(e)}")
                 raise HTTPException(status_code=500, detail="Internal server error")
@@ -66,20 +70,7 @@ class APIKeyDAO:
             try:
                 query = select(APIKeyModel).limit(limit).offset(offset)
                 result = await self.session.execute(query)
-                keys = [
-                    APIKeyInDB(
-                        id=key.id,
-                        api_key=key.api_key,
-                        is_active=key.is_active,
-                        never_expire=key.never_expire,
-                        expiration_date=timestamp_to_datetime(key.expiration_date),
-                        latest_query_date=timestamp_to_datetime(key.latest_query_date),
-                        total_queries=key.total_queries,
-                        name=key.name,
-                        proxied_links=key.proxied_links
-                    )
-                    for key in result.scalars().all()
-                ]
+                keys = [self._model_to_schema(key) for key in result.scalars().all()]
                 logger.info(f"Retrieved {len(keys)} API keys")
                 return keys
             except Exception as e:
@@ -93,17 +84,7 @@ class APIKeyDAO:
             db_key = result.scalar_one_or_none()
             if db_key:
                 logger.info(f"Retrieved API key: {api_key}")
-                return APIKeyInDB(
-                    id=db_key.id,
-                    api_key=db_key.api_key,
-                    is_active=db_key.is_active,
-                    never_expire=db_key.never_expire,
-                    expiration_date=timestamp_to_datetime(db_key.expiration_date),
-                    latest_query_date=timestamp_to_datetime(db_key.latest_query_date),
-                    total_queries=db_key.total_queries,
-                    name=db_key.name,
-                    proxied_links=db_key.proxied_links
-                )
+                return self._model_to_schema(db_key)
             else:
                 logger.warning(f"API key not found: {api_key}")
                 return None
@@ -115,20 +96,7 @@ class APIKeyDAO:
         try:
             query = select(APIKeyModel).where(APIKeyModel.name == name)
             result = await self.session.execute(query)
-            keys = [
-                APIKeyInDB(
-                    id=key.id,
-                    api_key=key.api_key,
-                    is_active=key.is_active,
-                    never_expire=key.never_expire,
-                    expiration_date=timestamp_to_datetime(key.expiration_date),
-                    latest_query_date=timestamp_to_datetime(key.latest_query_date),
-                    total_queries=key.total_queries,
-                    name=key.name,
-                    proxied_links=key.proxied_links
-                )
-                for key in result.scalars().all()
-            ]
+            keys = [self._model_to_schema(key) for key in result.scalars().all()]
             logger.info(f"Retrieved {len(keys)} API keys with name: {name}")
             return keys
         except Exception as e:
@@ -161,17 +129,7 @@ class APIKeyDAO:
             await self.session.refresh(db_key)
 
             logger.info(f"Updated API key: {api_key}")
-            return APIKeyInDB(
-                id=db_key.id,
-                api_key=db_key.api_key,
-                is_active=db_key.is_active,
-                never_expire=db_key.never_expire,
-                expiration_date=timestamp_to_datetime(db_key.expiration_date),
-                latest_query_date=timestamp_to_datetime(db_key.latest_query_date),
-                total_queries=db_key.total_queries,
-                name=db_key.name,
-                proxied_links=db_key.proxied_links
-            )
+            return self._model_to_schema(db_key)
         except HTTPException:
             raise
         except Exception as e:
@@ -248,20 +206,7 @@ class APIKeyDAO:
         try:
             query = select(APIKeyModel).order_by(APIKeyModel.latest_query_date.desc())
             result = await self.session.execute(query)
-            keys = [
-                APIKeyInDB(
-                    id=key.id,
-                    api_key=key.api_key,
-                    is_active=key.is_active,
-                    never_expire=key.never_expire,
-                    expiration_date=timestamp_to_datetime(key.expiration_date),
-                    latest_query_date=timestamp_to_datetime(key.latest_query_date),
-                    total_queries=key.total_queries,
-                    name=key.name,
-                    proxied_links=key.proxied_links
-                )
-                for key in result.scalars().all()
-            ]
+            keys = [self._model_to_schema(key) for key in result.scalars().all()]
             logger.info(f"Retrieved usage stats for {len(keys)} API keys")
             return keys
         except Exception as e:
@@ -305,20 +250,7 @@ class APIKeyDAO:
                 (APIKeyModel.expiration_date > datetime_to_timestamp(current_time))
             )
             result = await self.session.execute(query)
-            keys = [
-                APIKeyInDB(
-                    id=key.id,
-                    api_key=key.api_key,
-                    is_active=key.is_active,
-                    never_expire=key.never_expire,
-                    expiration_date=timestamp_to_datetime(key.expiration_date),
-                    latest_query_date=timestamp_to_datetime(key.latest_query_date),
-                    total_queries=key.total_queries,
-                    name=key.name,
-                    proxied_links=key.proxied_links
-                )
-                for key in result.scalars().all()
-            ]
+            keys = [self._model_to_schema(key) for key in result.scalars().all()]
             logger.info(f"Retrieved {len(keys)} active API keys")
             return keys
         except Exception as e:

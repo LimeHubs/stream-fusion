@@ -71,37 +71,35 @@ class RDTokenManager:
         unique_string = f"{self.client_id}:{self.client_secret}:{self.refresh_token}"
         return f"rd_access_token:{hashlib.sha256(unique_string.encode()).hexdigest()}"
 
-    def get_access_token(self):
+    async def get_access_token(self):
         token = self.redis.get(self.token_key)
         if token:
             self.logger.debug("Access token found in Redis")
             return token.decode("utf-8")
         self.logger.info("Access token not found in Redis, generating new token")
-        return self.new_access_token()
+        return await self.new_access_token()
 
-    def new_access_token(self):
+    async def new_access_token(self):
         self.logger.info("Requesting new access token from Real Debrid")
         try:
-            response = requests.post(
-                f"{self.BASE_URL}/token",
-                data={
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "code": self.refresh_token,
-                    "grant_type": "http://oauth.net/grant_type/device/1.0",
-                },
-            )
-
-            response.raise_for_status()
-
-            data = response.json()
-            self.logger.info("New access token received successfully")
-            self.redis.setex(self.token_key, 43200, data["access_token"])
-            self.logger.debug(
-                f"Access token stored in Redis with expiry: {data['expires_in']} seconds"
-            )
-
-            return data["access_token"]
-        except requests.exceptions.RequestException as e:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.BASE_URL}/token",
+                    data={
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                        "code": self.refresh_token,
+                        "grant_type": "http://oauth.net/grant_type/device/1.0",
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    self.logger.info("New access token received successfully")
+                    self.redis.setex(self.token_key, 43200, data["access_token"])
+                    self.logger.debug(
+                        f"Access token stored in Redis with expiry: {data['expires_in']} seconds"
+                    )
+                    return data["access_token"]
+        except aiohttp.ClientError as e:
             self.logger.error(f"Error requesting new access token: {str(e)}")
             raise

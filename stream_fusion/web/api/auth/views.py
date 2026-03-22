@@ -11,18 +11,10 @@ from stream_fusion.settings import settings
 from stream_fusion.utils.security import secret_based_security
 from stream_fusion.web.api.auth.schemas import UsageLog, UsageLogs
 from stream_fusion.logging_config import logger
+from stream_fusion.web.api.utils import ensure_uuid
 
 router = APIRouter()
 rd_service = RealDebridService()
-
-def ensure_uuid(api_key: str) -> UUID:
-    if isinstance(api_key, UUID):
-        return api_key
-    try:
-        return UUID(api_key)
-    except ValueError:
-        logger.error(f"Invalid API key format: {api_key}")
-        raise HTTPException(status_code=400, detail="Invalid API key format")
 
 @router.post(
     "/new",
@@ -39,7 +31,7 @@ async def create_new_api_key(
         name=name,
         never_expire=never_expires
     ))
-    logger.info(f"New API key created successfully. Key: {api_key.api_key}")
+    logger.info("New API key created successfully.")
     return api_key.api_key
 
 @router.get(
@@ -238,7 +230,7 @@ async def get_device_code():
     include_in_schema=settings.security_hide_docs
 )
 async def get_credentials(device_code: str):
-    logger.info(f"Requesting credentials for device code: {device_code}")
+    logger.info("Requesting credentials for device code")
     results = await rd_service.get_credentials(device_code)
     logger.info("Credentials received successfully")
     return results
@@ -267,7 +259,7 @@ async def get_alldebrid_pin():
 
 @router.get("/alldebrid/pin/check")
 async def check_alldebrid_pin(check: str, pin: str):
-    logger.info(f"Verifying AllDebrid PIN code: {pin}")
+    logger.info("Verifying AllDebrid PIN code")
     async with aiohttp.ClientSession() as session:
         async with session.get(f"https://api.alldebrid.com/v4/pin/check?check={check}&pin={pin}&agent={settings.ad_user_app}") as response:
             if response.status != 200:

@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional, Union
 import re
 
@@ -70,7 +71,7 @@ class Torr9Service:
             f"(S{season_num:02d}E{episode_num:02d})"
         )
 
-        raw = self._filter_series_results_for_torr9_only(raw, media)
+        raw = await asyncio.to_thread(self._filter_series_results_for_torr9_only, raw, media)
 
         logger.info(
             f"Torr9: {len(raw)} raw results after Torr9 local filtering for '{media.titles[0]}'"
