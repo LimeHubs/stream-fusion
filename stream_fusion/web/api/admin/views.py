@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
+from fastapi_simple_rate_limiter import RateLimiter
 from starlette.status import HTTP_303_SEE_OTHER
 import secrets
 import uuid
@@ -19,6 +20,12 @@ from stream_fusion.web.api.utils import ensure_uuid
 router = APIRouter()
 
 templates = Jinja2Templates(directory=settings.admin_template_dir)
+
+login_rate_limiter = RateLimiter(
+    limit=5,
+    seconds=60,
+    exception_message="Too many login attempts. Please try again in 60 seconds.",
+)
 
 SECRET_KEY_NAME = "secret-key"
 secret_header = APIKeyHeader(name=SECRET_KEY_NAME, auto_error=False)
@@ -86,6 +93,7 @@ async def login_page(request: Request):
 
 
 @router.post("/login")
+@login_rate_limiter
 async def login(
     request: Request, secret_key: str = Form(...), redis_client=get_redis_dependency()
 ):
