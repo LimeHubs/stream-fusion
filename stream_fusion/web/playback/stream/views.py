@@ -365,7 +365,7 @@ async def get_playback(
                 api_key_info = await apikey_dao.get_key_by_uuid(api_key)
                 if api_key_info and hasattr(api_key_info, 'proxied_links'):
                     use_proxy = api_key_info.proxied_links
-                    logger.info(f"Playback: API key {api_key} has proxied_links={use_proxy}")
+                    logger.info(f"Playback: API key {api_key[:4] + '***' if api_key else None} has proxied_links={use_proxy}")
             except Exception as e:
                 logger.error(f"Playback: Error checking API key proxification status: {e}")
         

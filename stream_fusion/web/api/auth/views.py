@@ -239,7 +239,7 @@ async def get_credentials(device_code: str):
     include_in_schema=settings.security_hide_docs
 )
 async def get_token(client_id: str, client_secret: str, device_code: str):
-    logger.info(f"Requesting token for device code: {device_code}")
+    logger.info(f"Requesting token for device code: {device_code[:4] + '***' if device_code else None}")
     results = await rd_service.get_token(client_id, client_secret, device_code)
     logger.info("Token received successfully")
     return results

@@ -30,13 +30,13 @@ class SecretManager:
                 secret_value = str(uuid.uuid4())
                 logger.warning(
                     "Environment variable 'SECRET_API_KEY' is in incorrect format. "
-                    f"Generated a single-use secret key for this session: {secret_value}"
+                    "Generated a single-use secret key for this session."
                 )
         else:
             secret_value = str(uuid.uuid4())
             logger.warning(
                 "Environment variable 'SECRET_API_KEY' not found. "
-                f"Generated a single-use secret key for this session: {secret_value}"
+                "Generated a single-use secret key for this session."
             )
         return secret_value
 

@@ -172,7 +172,7 @@ async def get_catalog(
             await check_api_key(api_key, apikey_dao)
 
         logger.debug(
-            f"Received catalog request from api_key: {api_key}, type: {type}, id: {id}, config: {config_data}"
+            f"Received catalog request from api_key: {api_key[:4] + '***' if api_key else None}, type: {type}, id: {id}"
         )
 
         if type not in {"movie", "series"} or id not in {
@@ -395,7 +395,7 @@ async def get_meta(
             await check_api_key(api_key, apikey_dao)
 
         logger.debug(
-            f"Received meta request from api_key: {api_key}, type: {type}, id: {id}"
+            f"Received meta request from api_key: {api_key[:4] + '***' if api_key else None}, type: {type}, id: {id}"
         )
 
         if type not in {"movie", "series"}:
