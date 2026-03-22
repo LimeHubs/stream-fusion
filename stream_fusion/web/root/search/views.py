@@ -203,7 +203,7 @@ async def full_prefetch_from_cache(media, config, redis_cache, stream_cache_key,
                             torrent_smart_container.update_availability(result, type(debrid), next_media)
 
                     if config["cache"]:
-                        torrent_smart_container.cache_container_items()
+                        asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
                     best_matching_results = torrent_smart_container.get_best_matching()
                     best_matching_results = sort_items(best_matching_results, config)
@@ -705,7 +705,7 @@ async def get_results(
                     )
 
         if config["cache"]:
-            torrent_smart_container.cache_container_items()
+            asyncio.create_task(asyncio.to_thread(torrent_smart_container.cache_container_items))
 
         best_matching_results = torrent_smart_container.get_best_matching()
         best_matching_results = sort_items(best_matching_results, config)

@@ -39,7 +39,7 @@ async def create_new_api_key(
         name=name,
         never_expire=never_expires
     ))
-    logger.info(f"New API key created successfully. Key: {api_key.api_key}")
+    logger.info("New API key created successfully.")
     return api_key.api_key
 
 @router.get(
