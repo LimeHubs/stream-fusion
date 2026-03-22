@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-import jsonpickle
+import json
 import time
 from typing import Any, List
 import hashlib
@@ -167,12 +167,29 @@ class RedisCache(CacheBase):
             self.logger.error(f"RedisCache: Unable to connect to Redis: {e}")
             return False
 
+    @staticmethod
+    def _serialize(value: Any) -> str:
+        if isinstance(value, (Movie, Series)):
+            return json.dumps(value.to_dict())
+        return json.dumps(value)
+
+    @staticmethod
+    def _deserialize(data: str) -> Any:
+        obj = json.loads(data)
+        if isinstance(obj, dict):
+            media_type = obj.get("__type__")
+            if media_type == "movie":
+                return Movie.from_dict(obj)
+            if media_type == "series":
+                return Series.from_dict(obj)
+        return obj
+
     async def get(self, key: str) -> Any:
         async def get_operation():
             client = await self.get_redis_client()
             cached_result = await client.get(key)
             if cached_result:
-                return jsonpickle.decode(cached_result)
+                return self._deserialize(cached_result)
             return None
 
         return await self.execute_with_retry(get_operation)
@@ -183,7 +200,7 @@ class RedisCache(CacheBase):
 
         async def set_operation():
             client = await self.get_redis_client()
-            cached_data = jsonpickle.encode(value)
+            cached_data = self._serialize(value)
             return await client.set(key, cached_data, ex=expiration)
 
         await self.execute_with_retry(set_operation)

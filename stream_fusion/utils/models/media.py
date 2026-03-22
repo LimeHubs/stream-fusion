@@ -5,3 +5,12 @@ class Media:
         self.titles = titles
         self.languages = languages
         self.type = type
+
+    def to_dict(self) -> dict:
+        return {
+            "__type__": self.type,
+            "id": self.id,
+            "tmdb_id": self.tmdb_id,
+            "titles": self.titles,
+            "languages": self.languages,
+        }
