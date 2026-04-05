@@ -15,7 +15,6 @@ from stream_fusion.services.postgresql.dao.torrentitem_dao import TorrentItemDAO
 from stream_fusion.services.postgresql.dao.torrentgroup_dao import TorrentGroupDAO
 from stream_fusion.utils.jackett.jackett_result import JackettResult
 from stream_fusion.utils.zilean.zilean_result import ZileanResult
-from stream_fusion.utils.yggfilx.yggflix_result import YggflixResult
 from stream_fusion.utils.generationfree.generationfree_result import GenerationFreeResult
 from stream_fusion.utils.c411.c411_result import C411Result
 from stream_fusion.utils.torr9.torr9_result import Torr9Result
@@ -252,7 +251,7 @@ class TorrentService:
         results: List[
             JackettResult
             | ZileanResult
-            | YggflixResult
+            | TorrentItem
             | GenerationFreeResult
             | C411Result
             | Torr9Result
@@ -261,12 +260,16 @@ class TorrentService:
             | G3MiniResult
             | TheOldSchoolResult
         ],
-        skip_yggflix_download: bool = False,
+        skip_utopeer_download: bool = False,
     ):
         torrent_items_result = []
 
         for result in results:
-            torrent_item = result.convert_to_torrent_item()
+            # TorrentItem objects (e.g. from UtopeerService) are already converted
+            if isinstance(result, TorrentItem):
+                torrent_item = result
+            else:
+                torrent_item = result.convert_to_torrent_item()
 
             cached_item = await self.get_cached_torrent(torrent_item.raw_title, torrent_item.indexer)
             if cached_item:
@@ -275,12 +278,9 @@ class TorrentService:
                 torrent_items_result.append(cached_item)
                 continue
 
-            if (
-                skip_yggflix_download
-                and settings.yggflix_url
-                and torrent_item.link
-                and torrent_item.link.startswith(settings.yggflix_url)
-            ):
+            # u2p / Utopeer results carry a pre-built magnet URI — there is no
+            # torrent file to download; cache directly and skip all HTTP processing.
+            if torrent_item.indexer == "u2p - Cache" or skip_utopeer_download:
                 await self.cache_torrent(torrent_item)
                 torrent_items_result.append(torrent_item)
                 continue

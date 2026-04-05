@@ -97,7 +97,7 @@ def _build_config_view(s) -> dict:
         },
         "indexers": [
             {"name": "Jackett",        "enabled": s.jackett_enable,        "url": f"{s.jackett_schema}://{s.jackett_host}:{s.jackett_port}", "key_set": _masked(s.jackett_api_key)},
-            {"name": "YGG / YGGFlix",  "enabled": _masked(s.ygg_passkey),  "url": s.yggflix_url,  "key_set": _masked(s.ygg_passkey)},
+            {"name": "u2p / Utopeer",  "enabled": _masked(s.utopeer_passkey),  "url": "wss://u2p.anhkagi.net",  "key_set": _masked(s.utopeer_passkey)},
             {"name": "C411",           "enabled": s.c411_enable,           "url": s.c411_url,      "key_set": _masked(s.c411_api_key) or _masked(s.c411_passkey)},
             {"name": "Torr9",          "enabled": s.torr9_enable,          "url": s.torr9_url,     "key_set": _masked(s.torr9_api_key)},
             {"name": "LaCale",         "enabled": s.lacale_enable,         "url": s.lacale_url,    "key_set": _masked(s.lacale_api_key)},
@@ -892,6 +892,36 @@ async def clean_orphan_torrents(
     except Exception as e:
         await db.rollback()
         logger.error(f"Admin maintenance: clean-orphan-torrents failed: {e}")
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/maintenance/migrate-u2p-indexer")
+async def migrate_u2p_indexer(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Rename legacy u2p/Nostr indexer names to the canonical 'u2p - Cache'."""
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    try:
+        legacy_names = ("Yggtorrent - API", "Nostr - Cache", "Ygg - Nostr", "Yggtorrent - Nostr")
+        placeholders = ", ".join(f":n{i}" for i in range(len(legacy_names)))
+        params = {f"n{i}": v for i, v in enumerate(legacy_names)}
+        result = await db.execute(
+            text(
+                f"UPDATE torrent_items SET indexer = 'u2p - Cache'"
+                f" WHERE indexer IN ({placeholders})"
+            ).bindparams(**params)
+        )
+        await db.commit()
+        count = result.rowcount
+        logger.info(f"Admin maintenance: migrated {count} torrent_items to indexer='u2p - Cache' (from: {legacy_names})")
+        return JSONResponse({"success": True, "updated": count, "message": f"{count} entrée(s) migrée(s) vers « u2p - Cache »"})
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Admin maintenance: migrate-u2p-indexer failed: {e}")
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
@@ -2175,3 +2205,76 @@ async def tmdb_matcher_revert(
         {"success": False, "message": "Revert échoué (déjà revert ou erreur DB)"},
         status_code=400,
     )
+
+
+# ── u2p / Utopeer relay status ────────────────────────────────────────────────
+
+# In-memory relay status cache (latency + online flag per URL, timestamp)
+_relay_status_cache: dict | None = None
+_relay_status_ts: float = 0.0
+_RELAY_STATUS_TTL = 60.0   # seconds
+
+
+async def _measure_relay(url: str, timeout: int = 3) -> dict:
+    """Ping a relay WebSocket and return {url, online, latency_ms}."""
+    import asyncio, time as _time
+    try:
+        import websockets
+        t0 = _time.monotonic()
+        async with websockets.connect(url, open_timeout=timeout, close_timeout=1):
+            latency_ms = round((_time.monotonic() - t0) * 1000)
+        return {"url": url, "online": True, "latency_ms": latency_ms}
+    except Exception:
+        return {"url": url, "online": False, "latency_ms": None}
+
+
+async def _get_relay_status(force: bool = False) -> dict:
+    """Return relay status dict, using in-memory cache unless force=True."""
+    import asyncio, time as _time
+
+    global _relay_status_cache, _relay_status_ts
+
+    age = _time.monotonic() - _relay_status_ts
+    if not force and _relay_status_cache is not None and age < _RELAY_STATUS_TTL:
+        return {**_relay_status_cache, "cached": True}
+
+    relay_urls = settings.utopeer_relay_urls
+    results = await asyncio.gather(*[_measure_relay(u) for u in relay_urls])
+    payload = {
+        "relays": list(results),
+        "checked_at": int(_time.time()),
+        "cached": False,
+    }
+    _relay_status_cache = payload
+    _relay_status_ts = _time.monotonic()
+    return payload
+
+
+@router.get("/utopeer/relay-status")
+async def utopeer_relay_status(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    payload = await _get_relay_status(force=False)
+    return JSONResponse(payload)
+
+
+@router.post("/utopeer/relay-refresh")
+async def utopeer_relay_refresh(
+    request: Request,
+    authenticated: bool = Depends(session_based_security),
+    _csrf: None = Depends(require_csrf),
+):
+    if isinstance(authenticated, RedirectResponse):
+        return JSONResponse({"error": "Non authentifié"}, status_code=401)
+    # Also invalidate the UtopeerService in-memory health cache
+    try:
+        import stream_fusion.utils.utopeer.utopeer_service as _svc
+        _svc._relay_healthy = None
+        _svc._relay_checked_at = 0.0
+    except Exception:
+        pass
+    payload = await _get_relay_status(force=True)
+    return JSONResponse(payload)

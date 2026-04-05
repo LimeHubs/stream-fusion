@@ -225,11 +225,25 @@ class Settings(BaseSettings):
     zilean_api_pool_maxsize: int = 10
     zilean_max_retry: int = 3
 
-    # YGG RELAY / YGGFLIX
-    yggflix_url: str = "https://u2p.anhkagi.net/torznab"
-    yggflix_max_workers: int = 4
-    ygg_passkey: str | None = None
-    ygg_unique_account: bool = False
+    # U2P / UTOPEER — Nostr WebSocket relays
+    utopeer_max_workers: int = 4
+    utopeer_passkey: str | None = None
+    utopeer_unique_account: bool = False
+    # Relay list stored as newline-separated URLs (editable in admin)
+    utopeer_relay_urls_raw: str = (
+        "wss://u2p.anhkagi.net\n"
+        "wss://u2prelais.eliottb.dev\n"
+        "wss://relay.ygg.gratis\n"
+        "wss://u2p.notrusted.me"
+    )
+    utopeer_relay_timeout: int = 8      # seconds per relay query
+    utopeer_ping_timeout: int = 2       # seconds for health-check ping
+    utopeer_relay_cache_ttl: int = 300  # seconds to cache healthy relay list
+
+    @property
+    def utopeer_relay_urls(self) -> list[str]:
+        """Parse utopeer_relay_urls_raw into a list of WSS URLs."""
+        return [u.strip() for u in self.utopeer_relay_urls_raw.splitlines() if u.strip()]
 
     # C411 TORZNAB
     c411_url: str = "https://c411.org"

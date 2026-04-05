@@ -372,13 +372,13 @@ SETTINGS_REGISTRY: list[SettingDef] = [
         ),
     ),
     SettingDef(
-        "ygg_unique_account", "bool",
-        "YGG — Compte unique serveur", "indexers",
+        "utopeer_unique_account", "bool",
+        "u2p / Utopeer — Compte unique serveur", "indexers",
         description=(
-            "Lorsqu'activé, stream-fusion utilise la passkey YGG configurée côté serveur "
-            "(variable YGG_PASSKEY) pour tous les utilisateurs, quelle que soit leur configuration "
-            "personnelle. Utile si l'administrateur dispose d'un compte YGG partagé pour l'instance. "
-            "Lorsque désactivé, chaque utilisateur doit fournir sa propre passkey YGG dans "
+            "Lorsqu'activé, stream-fusion utilise la passkey u2p configurée côté serveur "
+            "(variable UTOPEER_PASSKEY) pour tous les utilisateurs, quelle que soit leur configuration "
+            "personnelle. Utile si l'administrateur dispose d'un compte u2p partagé pour l'instance. "
+            "Lorsque désactivé, chaque utilisateur doit fournir sa propre passkey u2p dans "
             "sa configuration d'addon."
         ),
     ),
@@ -386,14 +386,12 @@ SETTINGS_REGISTRY: list[SettingDef] = [
     # ── Indexer URLs ──────────────────────────────────────────────────────
 
     SettingDef(
-        "yggflix_url", "str",
-        "URL du relay YGGFlix / YGG", "indexer_urls",
+        "utopeer_relay_urls_raw", "str",
+        "Relais u2p / Utopeer (WebSocket)", "indexer_urls",
         description=(
-            "URL de base du relay Torznab exposant les résultats YGG et YGGFlix. "
-            "Ce relay est un service intermédiaire qui traduit les requêtes Torznab "
-            "en appels vers YGG. "
-            "Modifiez cette valeur si vous hébergez votre propre instance du relay "
-            "ou si l'URL publique change."
+            "Adresses WSS des relais Nostr u2p interrogés en parallèle lors de chaque recherche. "
+            "Une URL par ligne. Les relais hors-ligne sont détectés automatiquement et exclus "
+            "temporairement (cache 5 min). Exemple : wss://u2p.anhkagi.net"
         ),
     ),
     SettingDef(

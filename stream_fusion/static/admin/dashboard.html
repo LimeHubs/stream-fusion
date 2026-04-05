@@ -64,6 +64,25 @@
     </div>
 </div>
 
+{# ── Ligne 1b : Statut relais u2p / Utopeer ── #}
+<div class="row g-3 mb-3">
+    <div class="col-12">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-semibold mb-0">
+                    <i class="bi bi-diagram-3 me-2 text-info"></i>Relais u2p / Utopeer
+                </h6>
+                <span id="dash-relay-checked" class="text-secondary" style="font-size:0.75rem;"></span>
+            </div>
+            <div id="dash-relay-list" class="d-flex flex-wrap gap-2">
+                <span style="font-size:0.82rem;color:var(--bs-secondary-color);">
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>Vérification…
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# ── Ligne 2 : Actions rapides + Scheduler ── #}
 <div class="row g-3 mb-3">
     <div class="col-md-6">
@@ -206,6 +225,41 @@
             document.getElementById('scheduler-widget').innerHTML =
                 '<span class="text-danger"><i class="bi bi-x-circle-fill me-1"></i>Indisponible</span>';
         });
+})();
+
+// ── u2p / Utopeer relay status widget ────────────────────────────────────────
+(function () {
+    var listEl = document.getElementById('dash-relay-list');
+    var labelEl = document.getElementById('dash-relay-checked');
+
+    function pillHtml(r) {
+        var host = r.url.replace(/^wss?:\/\//, '');
+        var dotCls = r.online ? 'background:var(--bs-success)' : 'background:var(--bs-danger)';
+        var latency = r.online && r.latency_ms != null ? ' · ' + r.latency_ms + 'ms' : '';
+        var status = r.online ? 'En ligne' : 'Hors ligne';
+        return '<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:0.78rem;background:var(--bs-tertiary-bg);border:1px solid var(--bs-border-color);">'
+            + '<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;' + dotCls + ';"></span>'
+            + host + ' · ' + status + latency
+            + '</span>';
+    }
+
+    function loadRelays() {
+        fetch('/admin/utopeer/relay-status')
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+            .then(function (data) {
+                listEl.innerHTML = (data.relays || []).map(pillHtml).join('');
+                if (data.checked_at) {
+                    var d = new Date(data.checked_at * 1000);
+                    labelEl.textContent = 'Vérifié à ' + d.toLocaleTimeString();
+                }
+            })
+            .catch(function () {
+                listEl.innerHTML = '<span class="text-danger" style="font-size:0.82rem;">Erreur de connexion</span>';
+            });
+    }
+
+    loadRelays();
+    setInterval(loadRelays, 60000);
 })();
 </script>
 {% endblock %}

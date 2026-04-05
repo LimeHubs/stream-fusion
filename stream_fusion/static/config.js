@@ -3,7 +3,7 @@ const qualityExclusions = ['2160p', '1080p', '720p', '480p', 'rips', 'cam', 'hev
 const languages = ['en', 'fr', 'multi', 'vfq'];
 
 
-const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'yggflix'];
+const implementedDebrids = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'utopeer'];
 
 const unimplementedDebrids = ['debrid_dl', 'debrid_ed', 'debrid_oc', 'debrid_pk'];
 
@@ -237,7 +237,7 @@ function resetADAuthButton() {
 }
 
 function handleUniqueAccounts() {
-    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'yggflix', 'c411', 'torr9', 'lacale', 'generationfree', 'abn', 'g3mini', 'theoldschool'];
+    const accounts = ['debrid_rd', 'debrid_ad', 'debrid_tb', 'debrid_pm', 'utopeer', 'c411', 'torr9', 'lacale', 'generationfree', 'abn', 'g3mini', 'theoldschool'];
 
     accounts.forEach(account => {
         const checkbox = document.getElementById(account);
@@ -525,7 +525,7 @@ function updateProviderFields() {
     const allDebrids = [...implementedDebrids, ...unimplementedDebrids];
 
     // Vérifier l'état des autres éléments de l'interface
-    const yggflixChecked = document.getElementById('yggflix')?.checked || document.getElementById('yggflix')?.disabled;
+    const utopeerChecked = document.getElementById('utopeer')?.checked || document.getElementById('utopeer')?.disabled;
     const torboxChecked = document.getElementById('debrid_tb')?.checked || document.getElementById('debrid_tb')?.disabled;
     const c411Checked = document.getElementById('c411')?.checked || document.getElementById('c411')?.disabled;
     const torr9Checked = document.getElementById('torr9')?.checked || document.getElementById('torr9')?.disabled;
@@ -724,14 +724,14 @@ function loadData() {
     const defaultConfig = {
         jackett: false,
         zilean: true,
-        yggflix: true,
+        utopeer: true,
         maxSize: '150',
         resultsPerQuality: '10',
         maxResults: '30',
         minCachedResults: '10',
         torrenting: false,
         ctg_yggtorrent: false,
-        ctg_yggflix: false,
+        ctg_utopeer: false,
         metadataProvider: 'tmdb',
         sort: 'quality',
         exclusion: ['cam'],
@@ -750,7 +750,7 @@ function loadData() {
         abn: false,
         g3mini: false,
         theoldschool: false,
-        yggflixPriority: true,
+        utopeerPriority: true,
         rdMinCachedBeforeCheck: 3,
         minPostgresResults: 20,
         postgresMaxAgeDays: 7,
@@ -786,7 +786,7 @@ function loadData() {
     setElementValue('debrid_order', serviceArray.length > 0, defaultConfig.debrid_order);
     
     setElementValue('ctg_yggtorrent', decodedData.yggtorrentCtg, defaultConfig.ctg_yggtorrent);
-    setElementValue('ctg_yggflix', decodedData.yggflixCtg, defaultConfig.ctg_yggflix);
+    setElementValue('ctg_utopeer', decodedData.utopeerCtg, defaultConfig.ctg_utopeer);
     
     setElementValue('rd_token_info', decodedData.RDToken, '');
     setElementValue('ad_token_info', decodedData.ADToken, '');
@@ -984,8 +984,8 @@ async function getLink(method) {
         exclusion: qualityExclusions.filter(quality => document.getElementById(quality).checked),
         jackett: document.getElementById('jackett')?.checked,
         zilean: document.getElementById('zilean')?.checked,
-        yggflix: document.getElementById('yggflix')?.checked,
-        yggflixPriority: document.getElementById('yggflixPriority')?.checked !== false,
+        utopeer: document.getElementById('utopeer')?.checked,
+        utopeerPriority: document.getElementById('utopeerPriority')?.checked !== false,
         indexerCategories: (() => {
             const cats = {};
             const _privCats = {
@@ -1001,14 +1001,14 @@ async function getLink(method) {
                 cats[key] = enabled ? (select?.value || defaultCat) : 'disabled';
             }
             // Indexeurs à catégorie fixe
-            const yggEl = document.getElementById('yggflix');
-            cats.yggflix = (yggEl?.checked || yggEl?.disabled) ? 'public' : 'disabled';
+            const yggEl = document.getElementById('utopeer');
+            cats.utopeer = (yggEl?.checked || yggEl?.disabled) ? 'public' : 'disabled';
             cats.zilean = document.getElementById('zilean')?.checked ? 'fallback_private' : 'disabled';
             cats.jackett = document.getElementById('jackett')?.checked ? 'fallback_private' : 'disabled';
             return cats;
         })(),
         yggtorrentCtg: document.getElementById('ctg_yggtorrent')?.checked,
-        yggflixCtg: document.getElementById('ctg_yggflix')?.checked,
+        utopeerCtg: document.getElementById('ctg_utopeer')?.checked,
         torrenting: false,
         debrid: false,
         metadataProvider: document.getElementById('tmdb').checked ? 'tmdb' : 'cinemeta',

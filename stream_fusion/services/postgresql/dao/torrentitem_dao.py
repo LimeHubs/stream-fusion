@@ -297,6 +297,10 @@ class TorrentItemDAO:
         Preferred over update_tmdb_id_by_raw_title when info_hash is available,
         as info_hash is unique per torrent and avoids title-collision risks.
         Skips the update if (info_hash, tmdb_id) is a known mismatch.
+
+        Each call runs inside a savepoint (nested transaction) so that a
+        deadlock on one row does not poison the outer transaction for all
+        subsequent calls in the same session.
         """
         try:
             mismatch_subq = (
@@ -314,18 +318,69 @@ class TorrentItemDAO:
                     updated_at=int(datetime.now(timezone.utc).timestamp())
                 )
             )
-            result = await self.session.execute(stmt)
-            await self.session.flush()
-            row_count = result.rowcount
+            # Savepoint: if this UPDATE deadlocks, only this savepoint is rolled
+            # back — the outer transaction remains intact and the next call succeeds.
+            async with self.session.begin_nested():
+                result = await self.session.execute(stmt)
+                row_count = result.rowcount
+
             if row_count:
                 logger.trace(f"TorrentItemDAO: Updated {row_count} torrents with info_hash '{info_hash}' to tmdb_id {tmdb_id}")
-                # Propagate the new tmdb_id to all members of the group (if any)
                 await self._propagate_tmdb_to_groups_by_hash(info_hash, tmdb_id)
             else:
                 logger.trace(f"TorrentItemDAO: Skipped tmdb_id assignment for '{info_hash}' (already set or known mismatch)")
             return row_count
         except Exception as e:
             logger.error(f"TorrentItemDAO: Error updating tmdb_id for info_hash '{info_hash}': {str(e)}")
+            return 0
+
+    async def bulk_update_tmdb_id_by_info_hashes(
+        self,
+        info_hashes: list[str],
+        tmdb_id: int,
+    ) -> int:
+        """Single-statement bulk UPDATE for a batch of info_hashes.
+
+        Preferred over calling update_tmdb_id_by_info_hash in a loop when
+        several hashes are known upfront: ONE statement acquires and releases
+        all row locks atomically, which prevents deadlocks between concurrent
+        requests that update overlapping hash sets.
+        """
+        if not info_hashes:
+            return 0
+        try:
+            # Correlated mismatch subquery — filters out known bad assignments per row
+            mismatch_subq = (
+                select(TmdbMismatchModel.id)
+                .where(TmdbMismatchModel.info_hash == TorrentItemModel.info_hash)
+                .where(TmdbMismatchModel.tmdb_id == tmdb_id)
+            )
+            stmt = (
+                update(TorrentItemModel)
+                .where(TorrentItemModel.info_hash.in_(info_hashes))
+                .where(TorrentItemModel.tmdb_id.is_(None))
+                .where(~exists(mismatch_subq))
+                .values(
+                    tmdb_id=tmdb_id,
+                    updated_at=int(datetime.now(timezone.utc).timestamp()),
+                )
+            )
+            async with self.session.begin_nested():
+                result = await self.session.execute(stmt)
+                row_count = result.rowcount
+
+            if row_count:
+                logger.trace(
+                    f"TorrentItemDAO: Bulk-updated {row_count} torrents "
+                    f"({len(info_hashes)} hashes) to tmdb_id {tmdb_id}"
+                )
+                for ih in info_hashes:
+                    await self._propagate_tmdb_to_groups_by_hash(ih, tmdb_id)
+            return row_count
+        except Exception as e:
+            logger.error(
+                f"TorrentItemDAO: Bulk tmdb_id update failed for {len(info_hashes)} hashes: {str(e)}"
+            )
             return 0
 
     async def update_tmdb_id_by_raw_title(self, raw_title: str, tmdb_id: int, indexer: str = None) -> int:
@@ -335,71 +390,74 @@ class TorrentItemDAO:
         1. Collect info_hashes of rows matching raw_title (+indexer safety filter), excluding known mismatches.
         2. Update ALL rows sharing those hashes (propagates to other indexers' copies of the same torrent).
         3. Rows without info_hash: update directly by raw_title+indexer (no propagation possible).
+
+        Runs inside a savepoint so a deadlock only rolls back this call, not the outer transaction.
         """
         try:
             now_ts = int(datetime.now(timezone.utc).timestamp())
             total_rows = 0
+            matched_hashes: list[str] = []
+            safe_hashes: list[str] = []
 
-            # ── Step 1: collect info_hashes of matching rows ──
-            hash_conditions = [
-                TorrentItemModel.raw_title == raw_title,
-                TorrentItemModel.tmdb_id.is_(None),
-                TorrentItemModel.info_hash.isnot(None),
-            ]
-            if indexer:
-                hash_conditions.append(TorrentItemModel.indexer == indexer)
+            async with self.session.begin_nested():
+                # ── Step 1: collect info_hashes of matching rows ──
+                hash_conditions = [
+                    TorrentItemModel.raw_title == raw_title,
+                    TorrentItemModel.tmdb_id.is_(None),
+                    TorrentItemModel.info_hash.isnot(None),
+                ]
+                if indexer:
+                    hash_conditions.append(TorrentItemModel.indexer == indexer)
 
-            hash_result = await self.session.execute(
-                select(TorrentItemModel.info_hash).where(*hash_conditions)
-            )
-            matched_hashes = [row[0] for row in hash_result.fetchall()]
-
-            if matched_hashes:
-                # Filter out hashes that are known mismatches for this tmdb_id
-                mismatch_result = await self.session.execute(
-                    select(TmdbMismatchModel.info_hash)
-                    .where(TmdbMismatchModel.info_hash.in_(matched_hashes))
-                    .where(TmdbMismatchModel.tmdb_id == tmdb_id)
+                hash_result = await self.session.execute(
+                    select(TorrentItemModel.info_hash).where(*hash_conditions)
                 )
-                mismatch_hashes = {row[0] for row in mismatch_result.fetchall()}
-                safe_hashes = [h for h in matched_hashes if h not in mismatch_hashes]
+                matched_hashes = [row[0] for row in hash_result.fetchall()]
 
-                if safe_hashes:
-                    # ── Step 2: propagate to ALL rows with those hashes (all indexers) ──
-                    result = await self.session.execute(
-                        update(TorrentItemModel)
-                        .where(TorrentItemModel.info_hash.in_(safe_hashes))
-                        .where(TorrentItemModel.tmdb_id.is_(None))
-                        .values(tmdb_id=tmdb_id, updated_at=now_ts)
+                if matched_hashes:
+                    # Filter out hashes that are known mismatches for this tmdb_id
+                    mismatch_result = await self.session.execute(
+                        select(TmdbMismatchModel.info_hash)
+                        .where(TmdbMismatchModel.info_hash.in_(matched_hashes))
+                        .where(TmdbMismatchModel.tmdb_id == tmdb_id)
                     )
-                    total_rows += result.rowcount
+                    mismatch_hashes = {row[0] for row in mismatch_result.fetchall()}
+                    safe_hashes = [h for h in matched_hashes if h not in mismatch_hashes]
 
-            # ── Step 3: rows without info_hash — direct update, no propagation possible ──
-            no_hash_conditions = [
-                TorrentItemModel.raw_title == raw_title,
-                TorrentItemModel.tmdb_id.is_(None),
-                TorrentItemModel.info_hash.is_(None),
-            ]
-            if indexer:
-                no_hash_conditions.append(TorrentItemModel.indexer == indexer)
+                    if safe_hashes:
+                        # ── Step 2: propagate to ALL rows with those hashes (all indexers) ──
+                        result = await self.session.execute(
+                            update(TorrentItemModel)
+                            .where(TorrentItemModel.info_hash.in_(safe_hashes))
+                            .where(TorrentItemModel.tmdb_id.is_(None))
+                            .values(tmdb_id=tmdb_id, updated_at=now_ts)
+                        )
+                        total_rows += result.rowcount
 
-            result = await self.session.execute(
-                update(TorrentItemModel)
-                .where(*no_hash_conditions)
-                .values(tmdb_id=tmdb_id, updated_at=now_ts)
-            )
-            total_rows += result.rowcount
+                # ── Step 3: rows without info_hash — direct update, no propagation possible ──
+                no_hash_conditions = [
+                    TorrentItemModel.raw_title == raw_title,
+                    TorrentItemModel.tmdb_id.is_(None),
+                    TorrentItemModel.info_hash.is_(None),
+                ]
+                if indexer:
+                    no_hash_conditions.append(TorrentItemModel.indexer == indexer)
 
-            await self.session.flush()
+                result = await self.session.execute(
+                    update(TorrentItemModel)
+                    .where(*no_hash_conditions)
+                    .values(tmdb_id=tmdb_id, updated_at=now_ts)
+                )
+                total_rows += result.rowcount
 
+            # savepoint committed — now log and propagate outside the savepoint
             if total_rows:
                 sibling_info = f", propagated via {len(matched_hashes)} hash(es)" if matched_hashes else ""
                 logger.trace(
                     f"TorrentItemDAO: Updated {total_rows} torrents with raw_title '{raw_title}'"
                     f" (indexer={indexer}{sibling_info}) to tmdb_id {tmdb_id}"
                 )
-                # Propagate tmdb_id to group members for all affected hashes
-                for info_hash in (safe_hashes if matched_hashes else []):
+                for info_hash in safe_hashes:
                     await self._propagate_tmdb_to_groups_by_hash(info_hash, tmdb_id)
             else:
                 logger.trace(

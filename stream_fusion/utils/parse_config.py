@@ -9,7 +9,7 @@ from stream_fusion.logging_config import logger
 #   priority_private    → Phase 1 (always queried), sort priority 1
 #   intermediary_private → Phase 2 (if private results < minCachedResults), sort priority 2
 #   fallback_private    → Phase 3 (last resort), sort priority 3
-#   public              → Phase 1 or last (depending on yggflixPriority), not counted in private threshold
+#   public              → Phase 1 or last (depending on utopeerPriority), not counted in private threshold
 DEFAULT_INDEXER_CATEGORIES = {
     "c411":           "priority_private",
     "torr9":          "priority_private",
@@ -20,7 +20,7 @@ DEFAULT_INDEXER_CATEGORIES = {
     "abn":            "fallback_private",
     "zilean":         "fallback_private",
     "jackett":        "fallback_private",
-    "yggflix":        "public",
+    "utopeer":        "public",
 }
 
 
@@ -62,12 +62,12 @@ def parse_config(config_token):
     # Legacy configs that have booleans but no indexerCategories: keep them as-is
     # (already handled above since indexerCategories was just set to defaults)
 
-    if "yggflix" not in config:
-        config["yggflix"] = True
+    if "utopeer" not in config:
+        config["utopeer"] = True
 
-    # Whether to query Yggflix (public) in Phase 1 (true) or after all private phases (false)
-    if "yggflixPriority" not in config:
-        config["yggflixPriority"] = True
+    # Whether to query Utopeer (public) in Phase 1 (true) or after all private phases (false)
+    if "utopeerPriority" not in config:
+        config["utopeerPriority"] = True
 
     # Skip RealDebrid if already N cached results from prior services (RD API is slow/restrictive)
     # 0 = disabled (always check RD if maxResults not reached)

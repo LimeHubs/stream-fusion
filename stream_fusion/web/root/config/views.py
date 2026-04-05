@@ -32,7 +32,7 @@ async def configure(request: Request):
         "request": request,
         "rd_unique_account": settings.rd_unique_account,
         "ad_unique_account": settings.ad_unique_account,
-        "ygg_unique_account": settings.ygg_unique_account,
+        "utopeer_unique_account": settings.utopeer_unique_account,
         "jackett_enable": settings.jackett_enable,
         "tb_unique_account": settings.tb_unique_account,
         "c411_enable": settings.c411_enable,
@@ -128,22 +128,22 @@ async def get_manifest(config: str, apikey_dao: APIKeyDAO = Depends()):
         logger.warning("Manifest: API key not found in config.")
         raise HTTPException(status_code=401, detail="API key not found in config.")
 
-    yggflix_ctg = config.get("yggflixCtg", True)
+    utopeer_ctg = config.get("utopeerCtg", True)
     yggtorrent_ctg = config.get("yggtorrentCtg", True)
 
     catalogs = []
 
-    if yggflix_ctg:
+    if utopeer_ctg:
         catalogs.extend([
             {
                 "type": "movie",
                 "id": "latest_movies",
-                "name": "Yggflix"
+                "name": "u2p - Utopeer"
             },
             {
                 "type": "series",
                 "id": "latest_tv_shows",
-                "name": "Yggflix"
+                "name": "u2p - Utopeer"
             }
         ])
 

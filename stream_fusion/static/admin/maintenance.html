@@ -322,6 +322,23 @@
                 </button>
             </div>
 
+            <div class="maint-action">
+                <div class="maint-action-info">
+                    <div class="maint-action-title">Migrer les indexeurs u2p vers « u2p - Cache »</div>
+                    <div class="maint-action-desc">
+                        Renomme les anciens indexeurs (<code>Yggtorrent - API</code>, <code>Nostr - Cache</code>,
+                        <code>Ygg - Nostr</code>…) en <code>u2p - Cache</code> dans la base de données.
+                        Les entrées sont conservées — seul le champ <code>indexer</code> est mis à jour.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-info flex-shrink-0 maint-btn"
+                        data-action="migrate-u2p-indexer"
+                        data-confirm-title="Migrer les indexeurs u2p ?"
+                        data-confirm-body="Les entrées torrent_items avec d'anciens noms d'indexeur u2p seront renommées en « u2p - Cache ». Aucune suppression.">
+                    <i class="bi bi-arrow-repeat me-1"></i>Migrer
+                </button>
+            </div>
+
             <!-- Groupement de torrents -->
             <div class="maint-group-label mt-3">Groupement de torrents (déduplication)</div>
 

@@ -108,7 +108,7 @@ document.addEventListener('click', function() { closeAllDropdowns(); });
 
 // ═══ YGG PRIORITY FLAIR ═══
 function updateYggPriorityFlair() {
-    var cb = document.getElementById('yggflixPriority');
+    var cb = document.getElementById('utopeerPriority');
     var flair = document.getElementById('yggPriorityFlair');
     if (!cb || !flair) return;
     var label = flair.querySelector('.flair-label');
@@ -368,7 +368,7 @@ function loadCred(prefix) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    var ygg = document.getElementById('yggflix');
+    var ygg = document.getElementById('utopeer');
     if (ygg) {
         Object.defineProperty(ygg, 'checked', {
             get: function() { return true; },
@@ -982,7 +982,7 @@ document.addEventListener('DOMContentLoaded', function() {
     updateWizard(true);
 
     // YGG PRIORITY FLAIR
-    var _yggPriCb = document.getElementById('yggflixPriority');
+    var _yggPriCb = document.getElementById('utopeerPriority');
     if (_yggPriCb) {
         _yggPriCb.addEventListener('change', updateYggPriorityFlair);
         updateYggPriorityFlair();

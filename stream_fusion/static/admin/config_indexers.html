@@ -7,17 +7,44 @@
 <style>
     .cfg-card { border: 1px solid var(--bs-border-color); border-radius: 10px; background: var(--bs-secondary-bg); overflow: hidden; margin-bottom: 1.25rem; }
     .cfg-card-header { padding: 13px 20px; border-bottom: 1px solid var(--bs-border-color); font-weight: 600; font-size: 0.875rem; display: flex; align-items: center; gap: 8px; }
+    .cfg-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; border-bottom: 1px solid var(--bs-border-color); gap: 12px; font-size: 0.83rem; min-height: 40px; }
+    .cfg-row:last-child { border-bottom: none; }
+    .cfg-label { color: var(--bs-secondary-color); flex-shrink: 0; }
+    .cfg-value { font-weight: 500; text-align: right; }
     .idx-table { width: 100%; font-size: 0.83rem; border-collapse: collapse; }
     .idx-table th { padding: 9px 20px; color: var(--bs-secondary-color); font-weight: 500; border-bottom: 1px solid var(--bs-border-color); text-align: left; }
     .idx-table td { padding: 8px 20px; border-bottom: 1px solid var(--bs-border-color); vertical-align: middle; }
     .idx-table tr:last-child td { border-bottom: none; }
     .idx-name { font-weight: 500; white-space: nowrap; min-width: 140px; }
     .idx-url-input { width: 100%; max-width: 380px; font-size: 0.82rem; }
+    /* Relay status widget */
+    .relay-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 0.78rem; background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); }
+    .relay-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .relay-dot.online { background: var(--bs-success); }
+    .relay-dot.offline { background: var(--bs-danger); }
+    .relay-dot.checking { background: var(--bs-warning); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 </style>
 {% endblock %}
 
 {% block content %}
 {{ config_breadcrumb('Indexeurs & TMDB') }}
+
+{# ── Relay status widget (outside form — read-only) ─────────────────────── #}
+<div class="cfg-card" id="relay-status-card">
+    <div class="cfg-card-header" style="justify-content:space-between;">
+        <span><i class="bi bi-diagram-3 text-info me-2"></i>Statut des relais u2p / Utopeer</span>
+        <span id="relay-checked-label" class="text-secondary" style="font-size:0.75rem;font-weight:400;"></span>
+    </div>
+    <div style="padding:14px 20px;">
+        <div id="relay-status-list" class="d-flex flex-wrap gap-2 mb-3">
+            <span class="relay-pill"><span class="relay-dot checking"></span>Vérification…</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-relay-refresh">
+            <i class="bi bi-arrow-clockwise me-1"></i>Vérifier maintenant
+        </button>
+    </div>
+</div>
 
 <div class="alert alert-secondary d-flex gap-2 align-items-start mb-4" style="font-size:0.83rem;">
     <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
@@ -59,22 +86,26 @@
                 </tr>
             </thead>
             <tbody>
-                {# YGG Relay / YGGFlix #}
+                {# u2p / Utopeer — Nostr WebSocket relays #}
                 <tr>
-                    <td class="idx-name">YGGFlix / YGG Relay</td>
+                    <td class="idx-name">u2p / Utopeer</td>
                     <td>
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" role="switch"
-                                   name="ygg_unique_account" value="true"
-                                   {% if effective.get('ygg_unique_account') %}checked{% endif %}
-                                   title="Compte unique serveur (utilise les credentials YGG pour tous les utilisateurs)">
+                                   name="utopeer_unique_account" value="true"
+                                   {% if effective.get('utopeer_unique_account') %}checked{% endif %}
+                                   title="Compte unique serveur (utilise le passkey u2p pour tous les utilisateurs)">
                         </div>
                         <div style="font-size:0.72rem;color:var(--bs-secondary-color);margin-top:2px;">Compte unique</div>
                     </td>
                     <td>
-                        <input type="text" class="form-control form-control-sm idx-url-input"
-                               name="yggflix_url" value="{{ effective.get('yggflix_url', '') }}"
-                               placeholder="https://relay.ygg.gratis/torznab">
+                        <label style="font-size:0.78rem;color:var(--bs-secondary-color);margin-bottom:3px;display:block;">
+                            Relais Nostr WSS — une URL par ligne
+                        </label>
+                        <textarea class="form-control form-control-sm font-monospace"
+                                  name="utopeer_relay_urls_raw" rows="4"
+                                  style="width:100%;max-width:420px;font-size:0.79rem;resize:vertical;"
+                                  placeholder="wss://u2p.anhkagi.net&#10;wss://u2prelais.eliottb.dev&#10;wss://relay.ygg.gratis&#10;wss://u2p.notrusted.me">{{ effective.get('utopeer_relay_urls_raw', '') }}</textarea>
                     </td>
                 </tr>
                 {# Jackett #}
@@ -227,4 +258,65 @@
 
 {% block extra_scripts %}
 {{ save_script('cfg-form', url_for('config_indexers_post')(request), url_for('config_indexers_reset')(request)) }}
+<script>
+(function () {
+    const listEl    = document.getElementById('relay-status-list');
+    const labelEl   = document.getElementById('relay-checked-label');
+    const btnRefresh = document.getElementById('btn-relay-refresh');
+    const STATUS_URL  = "{{ url_for('utopeer_relay_status')(request) }}";
+    const REFRESH_URL = "{{ url_for('utopeer_relay_refresh')(request) }}";
+
+    function pillHtml(r) {
+        const host    = r.url.replace(/^wss?:\/\//, '');
+        const cls     = r.online ? 'online' : 'offline';
+        const latency = r.online && r.latency_ms != null ? ' · ' + r.latency_ms + 'ms' : '';
+        const label   = r.online ? 'En ligne' : 'Hors ligne';
+        return '<span class="relay-pill">'
+             + '<span class="relay-dot ' + cls + '"></span>'
+             + host + ' — ' + label + latency
+             + '</span>';
+    }
+
+    function renderRelays(data) {
+        const relays = data.relays || [];
+        listEl.innerHTML = relays.length ? relays.map(pillHtml).join('') : '<span style="font-size:0.82rem;color:var(--bs-secondary-color);">Aucun relais configuré</span>';
+        if (data.checked_at) {
+            labelEl.textContent = 'Vérifié à ' + new Date(data.checked_at * 1000).toLocaleTimeString();
+        }
+        btnRefresh.disabled = false;
+        btnRefresh.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Vérifier maintenant';
+    }
+
+    function loadStatus(force) {
+        btnRefresh.disabled = true;
+        btnRefresh.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Vérification…';
+        listEl.innerHTML = '<span class="relay-pill"><span class="relay-dot checking"></span>Vérification…</span>';
+
+        let fetchPromise;
+        if (force) {
+            const fd = new FormData();
+            fd.append('csrf_token', window.__ADMIN_CSRF__ || '');
+            fetchPromise = fetch(REFRESH_URL, { method: 'POST', body: fd });
+        } else {
+            fetchPromise = fetch(STATUS_URL);
+        }
+
+        fetchPromise
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(renderRelays)
+            .catch(function (err) {
+                listEl.innerHTML = '<span class="text-danger" style="font-size:0.82rem;"><i class="bi bi-exclamation-triangle me-1"></i>Erreur : ' + err.message + '</span>';
+                btnRefresh.disabled = false;
+                btnRefresh.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Vérifier maintenant';
+            });
+    }
+
+    btnRefresh.addEventListener('click', function () { loadStatus(true); });
+    loadStatus(false);
+    setInterval(function () { loadStatus(false); }, 60000);
+})();
+</script>
 {% endblock %}

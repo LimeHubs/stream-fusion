@@ -25,7 +25,7 @@ from stream_fusion.logging_config import logger
 from stream_fusion.utils.jackett.jackett_result import JackettResult
 from stream_fusion.utils.jackett.jackett_service import JackettService
 from stream_fusion.utils.parser.parser_service import StreamParser
-from stream_fusion.utils.yggfilx.yggflix_service import YggflixService
+from stream_fusion.utils.utopeer.utopeer_service import UtopeerService
 from stream_fusion.utils.metdata.cinemeta import Cinemeta
 from stream_fusion.utils.metdata.tmdb import TMDB
 from stream_fusion.utils.models.movie import Movie
@@ -99,8 +99,22 @@ _INDEXER_CONFIG_KEY = {
     "ABN - API":            "abn",
     "G3MINI - API":         "g3mini",
     "TheOldSchool - API":   "theoldschool",
-    "Yggtorrent - API":     "yggflix",
+    "Yggtorrent - API":     "utopeer",
 }
+
+# Maps ANY indexer display name → its user config/category key.
+# Used for the public-indexer download-exclusion filter.
+# Covers cases where split()[0].lower() doesn't match the config key
+# (e.g. "u2p - Cache" → "u2p" ≠ "utopeer").
+_INDEXER_TO_CONFIG_KEY: dict[str, str] = {
+    **_INDEXER_CONFIG_KEY,
+    "u2p - Cache": "utopeer",
+}
+
+
+def _indexer_config_key(indexer: str) -> str:
+    """Return the config/category key for an indexer display name."""
+    return _INDEXER_TO_CONFIG_KEY.get(indexer) or (indexer.split()[0].lower() if indexer else "")
 
 
 def _build_next_episode_media(media):
@@ -121,22 +135,62 @@ def _build_next_episode_media(media):
 
 
 async def _bg_assign_tmdb_ids(session_factory, tmdb_data: list):
-    """Background task: sequential TMDB ID assignment with its own DB session."""
-    session = session_factory()
-    try:
-        dao = TorrentItemDAO(session)
-        for entry in tmdb_data:
-            if entry["info_hash"]:
-                await dao.update_tmdb_id_by_info_hash(entry["info_hash"], entry["tmdb_id"])
-            else:
+    """Background task: bulk TMDB ID assignment with retry on deadlock.
+
+    Groups entries by tmdb_id and fires ONE bulk UPDATE per group (single SQL
+    statement, atomic row-lock acquisition).
+
+    A short initial delay lets the inserting request session commit first —
+    this avoids the ShareLock-on-transaction deadlock that occurs when the
+    UPDATE tries to see rows inserted by a still-open concurrent transaction.
+    On deadlock the session is fully discarded and a fresh one is created.
+    """
+    from collections import defaultdict
+
+    # Separate hashes (bulk path) from title-only entries (rare fallback)
+    hashes_by_tmdb: dict[int, list[str]] = defaultdict(list)
+    no_hash_entries: list[dict] = []
+    for entry in tmdb_data:
+        if entry.get("info_hash"):
+            hashes_by_tmdb[entry["tmdb_id"]].append(entry["info_hash"])
+        else:
+            no_hash_entries.append(entry)
+
+    _MAX_RETRIES = 3
+    _RETRY_DELAYS = [0.15, 0.35, 0.70]   # seconds — progressive back-off
+
+    for attempt in range(_MAX_RETRIES):
+        # Brief delay on first attempt so the inserting transaction can commit.
+        # Longer delays on retries to let any concurrent UPDATE finish.
+        await asyncio.sleep(_RETRY_DELAYS[attempt])
+
+        session = session_factory()
+        try:
+            dao = TorrentItemDAO(session)
+
+            for tmdb_id, hashes in hashes_by_tmdb.items():
+                await dao.bulk_update_tmdb_id_by_info_hashes(hashes, tmdb_id)
+
+            for entry in no_hash_entries:
                 await dao.update_tmdb_id_by_raw_title(
                     entry["raw_title"], entry["tmdb_id"], indexer=entry.get("indexer")
                 )
-        await session.commit()
-    except Exception as e:
-        logger.debug(f"BG TMDB assign error: {e}")
-    finally:
-        await session.close()
+
+            await session.commit()
+            return   # success — exit retry loop
+
+        except Exception as e:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            if "deadlock" in str(e).lower() and attempt < _MAX_RETRIES - 1:
+                logger.debug(f"BG TMDB assign: deadlock on attempt {attempt + 1}/{_MAX_RETRIES}, retrying…")
+            else:
+                logger.debug(f"BG TMDB assign error (attempt {attempt + 1}): {e}")
+                return
+        finally:
+            await session.close()
 
 
 async def _bg_touch_items(session_factory, info_hashes: list):
@@ -326,15 +380,15 @@ async def full_prefetch_from_cache(
                         logger.debug(f"Pre-fetch: Jackett search failed: {e}")
                     return []
 
-                async def _fetch_yggflix():
-                    if not config.get("yggflix"):
+                async def _fetch_utopeer():
+                    if not config.get("utopeer"):
                         return []
                     try:
-                        yggflix_service = YggflixService(config)
-                        raw = await asyncio.to_thread(yggflix_service.search, next_media)
+                        utopeer_service = UtopeerService(config)
+                        raw = await utopeer_service.search(next_media)
                         return raw if raw else []
                     except Exception as e:
-                        logger.debug(f"Pre-fetch: Yggflix search failed: {e}")
+                        logger.debug(f"Pre-fetch: Utopeer search failed: {e}")
                     return []
 
                 ALL_FETCHERS = [
@@ -347,7 +401,7 @@ async def full_prefetch_from_cache(
                     ("theoldschool",   _fetch_theoldschool,   "TheOldSchool"),
                     ("zilean",         _fetch_zilean,         "Zilean"),
                     ("jackett",        _fetch_jackett,        "Jackett"),
-                    ("yggflix",        _fetch_yggflix,        "Yggflix"),
+                    ("utopeer",        _fetch_utopeer,        "Utopeer"),
                 ]
 
                 async def _run_phase(target_categories):
@@ -366,9 +420,9 @@ async def full_prefetch_from_cache(
                     return phase_results
 
                 min_cached = int(config.get("minCachedResults", 8))
-                yggflix_priority = config.get("yggflixPriority", True)
+                utopeer_priority = config.get("utopeerPriority", True)
 
-                phase1_cats = {"priority_private", "public"} if yggflix_priority else {"priority_private"}
+                phase1_cats = {"priority_private", "public"} if utopeer_priority else {"priority_private"}
                 phase1 = await _run_phase(phase1_cats)
                 search_results = merge_items(search_results, phase1)
 
@@ -380,7 +434,7 @@ async def full_prefetch_from_cache(
                     phase3 = await _run_phase({"fallback_private"})
                     search_results = merge_items(search_results, phase3)
 
-                if not yggflix_priority:
+                if not utopeer_priority:
                     phase4 = await _run_phase({"public"})
                     search_results = merge_items(search_results, phase4)
 
@@ -397,15 +451,19 @@ async def full_prefetch_from_cache(
                     # Step 2: retroactive TMDB ID assignment for confirmed items
                     if hasattr(next_media, "tmdb_id") and next_media.tmdb_id:
                         tmdb_id_int = int(next_media.tmdb_id)
-                        tmdb_updates = []
+                        bulk_hashes: list[str] = []
+                        title_updates = []
                         for item in confirmed_results:
                             if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
                                 if item.info_hash:
-                                    tmdb_updates.append(background_torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
+                                    bulk_hashes.append(item.info_hash)
                                 else:
-                                    tmdb_updates.append(background_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
+                                    title_updates.append(background_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
                                 item.tmdb_id = tmdb_id_int
-                        for coro in tmdb_updates:
+                        # One bulk UPDATE for all hashes — avoids per-row deadlocks
+                        if bulk_hashes:
+                            await background_torrent_dao.bulk_update_tmdb_id_by_info_hashes(bulk_hashes, tmdb_id_int)
+                        for coro in title_updates:
                             await coro
 
                     # Step 3: refresh TTL for Postgres items so cache-first stays valid
@@ -723,15 +781,15 @@ async def get_results(
                 logger.warning(f"Search: GenerationFree search failed, skipping: {str(e)}")
             return []
 
-        async def _fetch_yggflix_raw():
-            if not config.get("yggflix"):
+        async def _fetch_utopeer_raw():
+            if not config.get("utopeer"):
                 return []
             try:
-                yggflix_service = YggflixService(config)
-                raw = await asyncio.to_thread(yggflix_service.search, media)
+                utopeer_service = UtopeerService(config)
+                raw = await utopeer_service.search(media)
                 return raw if raw else []
             except Exception as e:
-                logger.warning(f"Search: Yggflix search failed, skipping: {str(e)}")
+                logger.warning(f"Search: Utopeer search failed, skipping: {str(e)}")
             return []
 
         async def _fetch_abn_raw():
@@ -808,7 +866,7 @@ async def get_results(
             ("theoldschool",  _fetch_theoldschool_raw, "TheOldSchool"),
             ("zilean",        _fetch_zilean_raw,       "Zilean"),
             ("jackett",       _fetch_jackett_raw,      "Jackett"),
-            ("yggflix",       _fetch_yggflix_raw,      "Yggflix"),
+            ("utopeer",       _fetch_utopeer_raw,      "Utopeer"),
         ]
 
         async def _run_phase(target_categories):
@@ -828,10 +886,10 @@ async def get_results(
             return phase_results
 
         min_cached = int(config["minCachedResults"])
-        yggflix_priority = config.get("yggflixPriority", True)
+        utopeer_priority = config.get("utopeerPriority", True)
 
-        # --- Phase 1: priority_private (always) + public if yggflixPriority=True ---
-        phase1_cats = {"priority_private", "public"} if yggflix_priority else {"priority_private"}
+        # --- Phase 1: priority_private (always) + public if utopeerPriority=True ---
+        phase1_cats = {"priority_private", "public"} if utopeer_priority else {"priority_private"}
         phase1 = await _run_phase(phase1_cats)
         search_results = merge_items(search_results, phase1)
         logger.info(f"Search: Phase 1 complete — {_count_private(search_results)} private results")
@@ -848,8 +906,8 @@ async def get_results(
             search_results = merge_items(search_results, phase3)
             logger.info(f"Search: Phase 3 complete — {_count_private(search_results)} private results")
 
-        # --- Phase 4: public after private phases (only if yggflixPriority=False) ---
-        if not yggflix_priority:
+        # --- Phase 4: public after private phases (only if utopeerPriority=False) ---
+        if not utopeer_priority:
             phase4 = await _run_phase({"public"})
             search_results = merge_items(search_results, phase4)
             logger.info(f"Search: Phase 4 (public) complete — {len(search_results)} total results")
@@ -1001,10 +1059,10 @@ async def get_results(
                     raw = await JackettService(config, session=http_session_bg).search(media)
                     return raw or []
 
-                async def _bg_fetch_yggflix():
-                    if not config.get("yggflix"):
+                async def _bg_fetch_utopeer():
+                    if not config.get("utopeer"):
                         return []
-                    raw = await asyncio.to_thread(YggflixService(config).search, media)
+                    raw = await UtopeerService(config).search(media)
                     return raw or []
 
                 BG_FETCHERS = [
@@ -1017,7 +1075,7 @@ async def get_results(
                     ("theoldschool",   _bg_fetch_theoldschool),
                     ("zilean",         _bg_fetch_zilean),
                     ("jackett",        _bg_fetch_jackett),
-                    ("yggflix",        _bg_fetch_yggflix),
+                    ("utopeer",        _bg_fetch_utopeer),
                 ]
 
                 # Feature C: wrap each fetcher with a per-indexer Redis lock
@@ -1052,15 +1110,19 @@ async def get_results(
                     bg_confirmed = await asyncio.to_thread(apply_correctness_filters, bg_results, media)
                     if hasattr(media, "tmdb_id") and media.tmdb_id:
                         tmdb_id_int = int(media.tmdb_id)
-                        tmdb_updates = []
+                        bg_bulk_hashes: list[str] = []
+                        bg_title_updates = []
                         for item in bg_confirmed:
                             if item.tmdb_id is None and item.indexer in _POSTGRES_INDEXERS:
                                 if item.info_hash:
-                                    tmdb_updates.append(bg_torrent_dao.update_tmdb_id_by_info_hash(item.info_hash, tmdb_id_int))
+                                    bg_bulk_hashes.append(item.info_hash)
                                 else:
-                                    tmdb_updates.append(bg_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
+                                    bg_title_updates.append(bg_torrent_dao.update_tmdb_id_by_raw_title(item.raw_title, tmdb_id_int, indexer=item.indexer))
                                 item.tmdb_id = tmdb_id_int
-                        for coro in tmdb_updates:
+                        # One bulk UPDATE for all hashes — avoids per-row deadlocks
+                        if bg_bulk_hashes:
+                            await bg_torrent_dao.bulk_update_tmdb_id_by_info_hashes(bg_bulk_hashes, tmdb_id_int)
+                        for coro in bg_title_updates:
                             await coro
                     pg_hashes = [
                         item.info_hash for item in bg_confirmed
@@ -1268,7 +1330,7 @@ async def get_results(
 
         best_matching_results = torrent_smart_container.get_best_matching()
 
-        # Exclude results from public indexers (e.g. Yggflix) that are not instantly cached
+        # Exclude results from public indexers (e.g. u2p / Utopeer) that are not instantly cached
         # at the debrid service — non-cached public torrents require a download, not a stream.
         _public_indexer_keys = {
             k for k, v in config.get("indexerCategories", {}).items() if v == "public"
@@ -1277,7 +1339,7 @@ async def get_results(
             before = len(best_matching_results)
             best_matching_results = [
                 item for item in best_matching_results
-                if (item.indexer.split()[0].lower() if item.indexer else "") not in _public_indexer_keys
+                if _indexer_config_key(item.indexer) not in _public_indexer_keys
                 or item.availability
             ]
             excluded = before - len(best_matching_results)
@@ -1288,12 +1350,17 @@ async def get_results(
         # Instant results (availability=True) are always shown — debrid already has the file.
         # Non-instant results from cache require the user to have the indexer configured, otherwise
         # the announce URL won't work (private tracker credentials belong to another user).
+        # Public indexers (e.g. u2p - Cache) are never shown non-instant — no credentials needed
+        # but they can't be streamed without debrid caching.
         if from_cache:
             before = len(best_matching_results)
             best_matching_results = [
                 item for item in best_matching_results
                 if item.availability
-                or config.get(_INDEXER_CONFIG_KEY.get(item.indexer, ""), False)
+                or (
+                    _indexer_config_key(item.indexer) not in _public_indexer_keys
+                    and config.get(_indexer_config_key(item.indexer), False)
+                )
             ]
             excluded = before - len(best_matching_results)
             if excluded:
